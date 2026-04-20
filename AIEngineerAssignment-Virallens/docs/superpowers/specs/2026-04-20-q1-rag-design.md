@@ -119,8 +119,7 @@ Build a production-grade multi-agent Retrieval-Augmented Generation (RAG) workfl
 {
     "query_type": str,          # "factual" | "conversational" | "ambiguous"
     "sub_queries": list[str],   # Decomposed sub-questions
-    "route": str,               # "retriever" | "reasoner" | "clarify"
-    "cache_key": str | None     # Semantic cache key if hit
+    "route": str                # "retriever" | "reasoner" | "clarify"
 }
 ```
 
@@ -338,7 +337,7 @@ class RateLimiter:
         self.max_rpm = max_rpm
         self.requests = defaultdict(list)  # provider -> [timestamps]
 
-    async def call_with_retry(self, fn: Callable, *args, **kwargs):
+    async def call_with_retry(self, fn: Callable, provider: str, *args, **kwargs):
         for attempt in range(3):
             if not self._can_make_request(provider):
                 await self._backoff(attempt)
@@ -356,15 +355,17 @@ class RateLimiter:
 
 **File:** `utils/cache.py`
 
-Redis-based caching of query embeddings:
-- Key: `hash(query_embedding)`
+Redis-based caching of retrieved chunks:
+- Key: `hash(normalized_query_text)` (not embedding bytes for stability)
 - Value: `retrieved_chunks`
 - TTL: 1 hour
 - Hit rate target: 60%+ on repeated queries
 
 ```python
-async def get_cached_chunks(query_embedding: np.ndarray) -> Optional[List[dict]]:
-    key = hashlib.sha256(query_embedding.tobytes()).hexdigest()
+async def get_cached_chunks(query: str) -> Optional[List[dict]]:
+    # Normalize query: lowercase, strip whitespace/punctuation
+    normalized = re.sub(r'\s+', ' ', query.lower().strip())
+    key = hashlib.sha256(normalized.encode()).hexdigest()
     cached = await redis.get(f"semantic:{key}")
     return json.loads(cached) if cached else None
 ```
@@ -513,7 +514,11 @@ from qdrant_client.models import Distance, VectorParams
 
 client = QdrantClient(url="http://localhost:6334")
 
-client.recreate_collection(
+# Use delete + create instead of deprecated recreate_collection
+if client.collection_exists("virallens_docs"):
+    client.delete_collection("virallens_docs")
+
+client.create_collection(
     collection_name="virallens_docs",
     vectors_config=VectorParams(
         size=768,                    # nomic-embed-text dimension
