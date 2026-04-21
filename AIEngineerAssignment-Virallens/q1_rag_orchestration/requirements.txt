@@ -12,6 +12,10 @@ groq
 google-generativeai
 openrouter
 ollama
+langchain-groq
+langchain-google-genai
+langchain-ollama
+langchain-openrouter
 
 # Embeddings & Reranking
 sentence-transformers
